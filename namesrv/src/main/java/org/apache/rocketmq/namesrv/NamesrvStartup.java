@@ -43,8 +43,11 @@ import org.slf4j.LoggerFactory;
 
 public class NamesrvStartup {
 
+    // 与日志相关
     private static InternalLogger log;
+    // 与配置相关
     private static Properties properties = null;
+    // 与命令行相关
     private static CommandLine commandLine = null;
 
     public static void main(String[] args) {
@@ -55,7 +58,9 @@ public class NamesrvStartup {
 
         try {
             NamesrvController controller = createNamesrvController(args);
+            // 调用NamesrvController的initialize方法进行初始化
             start(controller);
+            // 初始化完成
             String tip = "The Name Server boot success. serializeType=" + RemotingCommand.getSerializeTypeConfigInThisServer();
             log.info(tip);
             System.out.printf("%s%n", tip);
@@ -73,24 +78,37 @@ public class NamesrvStartup {
         //PackageConflictDetect.detectFastjson();
 
         Options options = ServerUtil.buildCommandlineOptions(new Options());
+        // 根据输入的参数构造CommandLine对象
         commandLine = ServerUtil.parseCmdLine("mqnamesrv", args, buildCommandlineOptions(options), new PosixParser());
         if (null == commandLine) {
             System.exit(-1);
             return null;
         }
 
+        // 获取NameServer的默认配置，例如配置文件存储路径，默认是在${user.home}下
         final NamesrvConfig namesrvConfig = new NamesrvConfig();
+        // 获取netty的默认配置，例如工作的线程数
+        // NameServer对外接收Broker和客户端的网络请求的时候，底层是基于Netty实现的网络服务器
         final NettyServerConfig nettyServerConfig = new NettyServerConfig();
+        // 设置netty的监听端口，默认是8888，这个应该可以定义到NettyServerConfig里
         nettyServerConfig.setListenPort(9876);
+        // 是否通过main方法输入参数设置配置文件路径
         if (commandLine.hasOption('c')) {
+            // 获取配置文件路径
             String file = commandLine.getOptionValue('c');
+            // 路径不为空
             if (file != null) {
+                // 通过输入流获取文件
                 InputStream in = new BufferedInputStream(new FileInputStream(file));
                 properties = new Properties();
+                // 加载文件配置
                 properties.load(in);
+                // 将配置文件内容映射到NamesrvConfig配置对象中
                 MixAll.properties2Object(properties, namesrvConfig);
+                // 将配置文件内容映射到NettyServerConfig配置对象中
                 MixAll.properties2Object(properties, nettyServerConfig);
 
+                // 设置配置文件路径
                 namesrvConfig.setConfigStorePath(file);
 
                 System.out.printf("load config properties file OK, %s%n", file);
@@ -105,8 +123,10 @@ public class NamesrvStartup {
             System.exit(0);
         }
 
+        // 将命令行参数转为properties，然后再将properties属性设置到配置类对象中
         MixAll.properties2Object(ServerUtil.commandLine2Properties(commandLine), namesrvConfig);
 
+        // 没有设置RocketMq的Home目录直接退出
         if (null == namesrvConfig.getRocketmqHome()) {
             System.out.printf("Please set the %s variable in your environment to match the location of the RocketMQ installation%n", MixAll.ROCKETMQ_HOME_ENV);
             System.exit(-2);
@@ -116,13 +136,16 @@ public class NamesrvStartup {
         JoranConfigurator configurator = new JoranConfigurator();
         configurator.setContext(lc);
         lc.reset();
+        // 根据logback日志配置文件地址初始化日志框架
         configurator.doConfigure(namesrvConfig.getRocketmqHome() + "/conf/logback_namesrv.xml");
 
         log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);
 
+        // todo 将初始化的日志对象赋值到配置类对象中，这块代码不是很理解
         MixAll.printObjectProperties(log, namesrvConfig);
         MixAll.printObjectProperties(log, nettyServerConfig);
 
+        // 根据配置创建NamesrvController对象
         final NamesrvController controller = new NamesrvController(namesrvConfig, nettyServerConfig);
 
         // remember all configs to prevent discard
