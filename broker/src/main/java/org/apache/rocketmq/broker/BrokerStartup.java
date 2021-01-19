@@ -90,16 +90,18 @@ public class BrokerStartup {
     public static BrokerController createBrokerController(String[] args) {
         System.setProperty(RemotingCommand.REMOTING_VERSION_KEY, Integer.toString(MQVersion.CURRENT_VERSION));
 
+        // 获取系统级变量,如果不存在则设置一个默认值
         if (null == System.getProperty(NettySystemConfig.COM_ROCKETMQ_REMOTING_SOCKET_SNDBUF_SIZE)) {
-            NettySystemConfig.socketSndbufSize = 131072;
+            NettySystemConfig.socketSndbufSize = 131072;// 发送缓冲池大小
         }
 
         if (null == System.getProperty(NettySystemConfig.COM_ROCKETMQ_REMOTING_SOCKET_RCVBUF_SIZE)) {
-            NettySystemConfig.socketRcvbufSize = 131072;
+            NettySystemConfig.socketRcvbufSize = 131072;// 接收缓冲池大小
         }
 
         try {
             //PackageConflictDetect.detectFastjson();
+            // 从命令行解析broker的参数
             Options options = ServerUtil.buildCommandlineOptions(new Options());
             commandLine = ServerUtil.parseCmdLine("mqbroker", args, buildCommandlineOptions(options),
                 new PosixParser());
@@ -107,20 +109,28 @@ public class BrokerStartup {
                 System.exit(-1);
             }
 
-            final BrokerConfig brokerConfig = new BrokerConfig();
-            final NettyServerConfig nettyServerConfig = new NettyServerConfig();
-            final NettyClientConfig nettyClientConfig = new NettyClientConfig();
+            // 这三个是Broker的核心配置类,分别是:broker的配置,netty服务器的配置,netty客户端的配置
+            // Broker需要作为服务端接收和分发消息,也要作为客户端注册到Namesrv上
+            final BrokerConfig brokerConfig = new BrokerConfig();// broker自身的配置
+            final NettyServerConfig nettyServerConfig = new NettyServerConfig();// netty服务器的配置
+            final NettyClientConfig nettyClientConfig = new NettyClientConfig();// netty客户端的配置
 
+            // 设置是否使用TLS的配置,TLS是一种加密机制
             nettyClientConfig.setUseTLS(Boolean.parseBoolean(System.getProperty(TLS_ENABLE,
                 String.valueOf(TlsSystemConfig.tlsMode == TlsMode.ENFORCING))));
+            // 设置netty服务器的监听端口号是10911
             nettyServerConfig.setListenPort(10911);
+            // 关键配置,用来存储消息的一些配置信息
             final MessageStoreConfig messageStoreConfig = new MessageStoreConfig();
 
+            // 如果当前这个broker是slave的话,那么这里就要设置一个特殊的参数,
             if (BrokerRole.SLAVE == messageStoreConfig.getBrokerRole()) {
                 int ratio = messageStoreConfig.getAccessMessageInMemoryMaxRatio() - 10;
+                // 设置消息占用内存的最大比例,超出该比例,将被换出内存
                 messageStoreConfig.setAccessMessageInMemoryMaxRatio(ratio);
             }
 
+            // 设置了配置文件路径
             if (commandLine.hasOption('c')) {
                 String file = commandLine.getOptionValue('c');
                 if (file != null) {
@@ -130,6 +140,7 @@ public class BrokerStartup {
                     properties.load(in);
 
                     properties2SystemEnv(properties);
+                    // 解析配置到各个配置类
                     MixAll.properties2Object(properties, brokerConfig);
                     MixAll.properties2Object(properties, nettyServerConfig);
                     MixAll.properties2Object(properties, nettyClientConfig);
@@ -140,13 +151,16 @@ public class BrokerStartup {
                 }
             }
 
+            // 命令行里的参数直接解析到broker配置类中
             MixAll.properties2Object(ServerUtil.commandLine2Properties(commandLine), brokerConfig);
 
+            // 检查ROCKETMQ_HOME环境变量是否存在,没有的话调用System.exit(-2)退出JVM进程
             if (null == brokerConfig.getRocketmqHome()) {
                 System.out.printf("Please set the %s variable in your environment to match the location of the RocketMQ installation", MixAll.ROCKETMQ_HOME_ENV);
                 System.exit(-2);
             }
 
+            // 从配置中读取Nameserver地址列表,读取出来之后会进行一定的格式解析,比如按照";"符号进行字符串的切割,因为nameserver可能有多个地址
             String namesrvAddr = brokerConfig.getNamesrvAddr();
             if (null != namesrvAddr) {
                 try {
@@ -162,10 +176,11 @@ public class BrokerStartup {
                 }
             }
 
+            // 判断Broker的角色,针对不同的角色做不同的处理
             switch (messageStoreConfig.getBrokerRole()) {
                 case ASYNC_MASTER:
                 case SYNC_MASTER:
-                    brokerConfig.setBrokerId(MixAll.MASTER_ID);
+                    brokerConfig.setBrokerId(MixAll.MASTER_ID);// 设置Broker主节点id,默认0
                     break;
                 case SLAVE:
                     if (brokerConfig.getBrokerId() <= 0) {
@@ -178,17 +193,22 @@ public class BrokerStartup {
                     break;
             }
 
+            // 判断是否基于dleger技术来管理主从同步和commitlog,如果是的话,就把brokerid设置为-1
             if (messageStoreConfig.isEnableDLegerCommitLog()) {
                 brokerConfig.setBrokerId(-1);
             }
 
+            // todo 设置HA监听端口号
             messageStoreConfig.setHaListenPort(nettyServerConfig.getListenPort() + 1);
+            // 和日志相关
             LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
             JoranConfigurator configurator = new JoranConfigurator();
             configurator.setContext(lc);
             lc.reset();
+            // 从ROCKETMQ_HOME路径读取broker的日志配置文件
             configurator.doConfigure(brokerConfig.getRocketmqHome() + "/conf/logback_broker.xml");
 
+            // 如果命令行中包含-p参数,则启动broker的时候打印所有配置类的启动参数
             if (commandLine.hasOption('p')) {
                 InternalLogger console = InternalLoggerFactory.getLogger(LoggerName.BROKER_CONSOLE_NAME);
                 MixAll.printObjectProperties(console, brokerConfig);
@@ -196,7 +216,7 @@ public class BrokerStartup {
                 MixAll.printObjectProperties(console, nettyClientConfig);
                 MixAll.printObjectProperties(console, messageStoreConfig);
                 System.exit(0);
-            } else if (commandLine.hasOption('m')) {
+            } else if (commandLine.hasOption('m')) {// m参数也是打印配置参数
                 InternalLogger console = InternalLoggerFactory.getLogger(LoggerName.BROKER_CONSOLE_NAME);
                 MixAll.printObjectProperties(console, brokerConfig, true);
                 MixAll.printObjectProperties(console, nettyServerConfig, true);
@@ -205,6 +225,7 @@ public class BrokerStartup {
                 System.exit(0);
             }
 
+            // 这里还会再打印broker的配置参数
             log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
             MixAll.printObjectProperties(log, brokerConfig);
             MixAll.printObjectProperties(log, nettyServerConfig);

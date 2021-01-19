@@ -63,6 +63,9 @@ import org.apache.rocketmq.remoting.exception.RemotingTimeoutException;
 import org.apache.rocketmq.remoting.exception.RemotingTooMuchRequestException;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
+/**
+ * 基于 Netty 的原始 API 实现的一个 ServerBootstrap，用作网络服务器
+ */
 public class NettyRemotingServer extends NettyRemotingAbstract implements RemotingServer {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(RemotingHelper.ROCKETMQ_REMOTING);
     private final ServerBootstrap serverBootstrap;
@@ -180,6 +183,9 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
             && Epoll.isAvailable();
     }
 
+    /**
+     * NamesrvController的start方法会调用NettyRemotingServer的start方法
+     */
     @Override
     public void start() {
         this.defaultEventExecutorGroup = new DefaultEventExecutorGroup(
@@ -196,6 +202,9 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
 
         prepareSharableHandlers();
 
+        // 基于Netty的API去配置和启动一个Netty的网络服务器
+        // 这里基于ServerBootstrap的group方法,对Netty服务器进行各种网络上的配置
+        // 下面这些配置都是跟Netty相关的
         ServerBootstrap childHandler =
             this.serverBootstrap.group(this.eventLoopGroupBoss, this.eventLoopGroupSelector)
                 .channel(useEpoll() ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
@@ -205,7 +214,13 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                 .childOption(ChannelOption.TCP_NODELAY, true)
                 .childOption(ChannelOption.SO_SNDBUF, nettyServerConfig.getServerSocketSndBufSize())
                 .childOption(ChannelOption.SO_RCVBUF, nettyServerConfig.getServerSocketRcvBufSize())
+                    // 这行代码,设置了Netty服务器要监听的端口号,默认就是9876
                 .localAddress(new InetSocketAddress(this.nettyServerConfig.getListenPort()))
+                    // 这里设置一大堆的网络请求处理器,只要Netty服务器收到一个请求,那么就会一次使用下面的处理器来处理请求,
+                    // 比如说handShakeHandler就是负责连接握手
+                    // NettyDecoder负责编解码,IdleStateHandler是负责连接空闲管理的
+                    // connectionManageHandler是负责网络连接管理的
+                    // serverHandler是负责最关键的网络请求的处理的
                 .childHandler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     public void initChannel(SocketChannel ch) throws Exception {
@@ -226,6 +241,8 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         }
 
         try {
+            // 下面的代码,启动Netty服务器
+            // bind方法,绑定和监听一个端口号
             ChannelFuture sync = this.serverBootstrap.bind().sync();
             InetSocketAddress addr = (InetSocketAddress) sync.channel().localAddress();
             this.port = addr.getPort();

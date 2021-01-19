@@ -77,14 +77,18 @@ public class NamesrvController {
 
         this.kvConfigManager.load();
 
+        // new一个Netty网络服务器
         this.remotingServer = new NettyRemotingServer(this.nettyServerConfig, this.brokerHousekeepingService);
 
         // netty工作线程池，默认线程数量为8
         this.remotingExecutor =
             Executors.newFixedThreadPool(nettyServerConfig.getServerWorkerThreads(), new ThreadFactoryImpl("RemotingExecutorThread_"));
 
+        // 把工作线程池交给Netty服务器
         this.registerProcessor();
 
+        // 启动一个后台线程,执行定时任务的
+        // scanNotActiveBroker,定时扫描哪些broker没发送心跳,检测是不是挂了
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -93,6 +97,8 @@ public class NamesrvController {
             }
         }, 5, 10, TimeUnit.SECONDS);
 
+        // 启动一个后台线程,执行定时任务的
+        // 定时打印kv配置信息
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -101,6 +107,7 @@ public class NamesrvController {
             }
         }, 1, 10, TimeUnit.MINUTES);
 
+        // FileWatch相关
         if (TlsSystemConfig.tlsMode != TlsMode.DISABLED) {
             // Register a listener to reload SslContext
             try {
@@ -154,7 +161,7 @@ public class NamesrvController {
     }
 
     public void start() throws Exception {
-        this.remotingServer.start();
+        this.remotingServer.start();// 核心逻辑,启动Netty服务器NettyRemotingServer
 
         if (this.fileWatchService != null) {
             this.fileWatchService.start();
@@ -162,9 +169,9 @@ public class NamesrvController {
     }
 
     public void shutdown() {
-        this.remotingServer.shutdown();
-        this.remotingExecutor.shutdown();
-        this.scheduledExecutorService.shutdown();
+        this.remotingServer.shutdown();// 释放Netty网络资源
+        this.remotingExecutor.shutdown();// 释放Netty服务器工作线程池的资源
+        this.scheduledExecutorService.shutdown();// 释放定时任务的后台线程资源
 
         if (this.fileWatchService != null) {
             this.fileWatchService.shutdown();

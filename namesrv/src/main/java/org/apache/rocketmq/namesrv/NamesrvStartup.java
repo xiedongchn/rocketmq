@@ -160,12 +160,15 @@ public class NamesrvStartup {
             throw new IllegalArgumentException("NamesrvController is null");
         }
 
+        // 初始化构造Netty服务器,里边内容较多,可以仔细研究
         boolean initResult = controller.initialize();
         if (!initResult) {
             controller.shutdown();
             System.exit(-3);
         }
 
+        // 注册一个JVM关闭时候的shutdown钩子,即JVM关闭的时候会执行上述注册的回调函数
+        // 回调函数里执行了NamesrvController.shutdown()方法,关闭Netty服务器,释放网络资源和线程资源
         Runtime.getRuntime().addShutdownHook(new ShutdownHookThread(log, new Callable<Void>() {
             @Override
             public Void call() throws Exception {
@@ -174,6 +177,7 @@ public class NamesrvStartup {
             }
         }));
 
+        // 前面初始化了Netty服务器,但是还没启动,没启动的话,Netty服务器就不会监听9876这个默认的端口号,NameServer就什么也干不了
         controller.start();
 
         return controller;
