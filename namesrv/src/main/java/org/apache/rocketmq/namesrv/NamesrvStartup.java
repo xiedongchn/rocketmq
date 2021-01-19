@@ -141,7 +141,7 @@ public class NamesrvStartup {
 
         log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);
 
-        // todo 将初始化的日志对象赋值到配置类对象中，这块代码不是很理解
+        // 通过日志对象将配置类属性打印出来
         MixAll.printObjectProperties(log, namesrvConfig);
         MixAll.printObjectProperties(log, nettyServerConfig);
 
