@@ -111,25 +111,37 @@ public class RouteInfoManager {
         RegisterBrokerResult result = new RegisterBrokerResult();
         try {
             try {
-                // 因为要操作多个Map,所以要先加锁,由于需要预先加锁,所以对应的Map只需要是HashMap类型即可,而不需要ConcurrentHashMap
+                // 因为要操作多个Map,所以要先加写锁,由于需要预先加锁,所以对应的Map只需要是HashMap类型即可,而不需要ConcurrentHashMap
+                // 同一时间只能由一个线程执行
                 this.lock.writeLock().lockInterruptibly();
 
+                // 根据clusterName获取一个set集合
                 Set<String> brokerNames = this.clusterAddrTable.get(clusterName);
                 if (null == brokerNames) {
                     brokerNames = new HashSet<String>();
                     this.clusterAddrTable.put(clusterName, brokerNames);
                 }
+                // 然后把BrokerName扔到这个set集合里去,这就是在维护一个集群里有那些broker存在的一个set数据结构,加入后续每隔30秒发送
+                // 注册请求作为心跳,这里不受影响,因为同样的数据放进去,set集合会自动去重
                 brokerNames.add(brokerName);
 
                 boolean registerFirst = false;
 
+                // 根据brokerName获取到BrokerData,brokerAddrTable是核心路由数据表,存放所有Broker的详细路由数据
                 BrokerData brokerData = this.brokerAddrTable.get(brokerName);
+
+                // 如果是第一次注册,这里就是null,那么会根据Broker的信息封装一个BrokerData,丢到路由数据表中
+                // 这个其实就是核心的Broker注册过程
+                // 后续再发送注册请求时,不会再重复处理
                 if (null == brokerData) {
                     registerFirst = true;
                     brokerData = new BrokerData(clusterName, brokerName, new HashMap<Long, String>());
                     this.brokerAddrTable.put(brokerName, brokerData);
                 }
+
+                // 对路由数据做一些处理
                 Map<Long, String> brokerAddrsMap = brokerData.getBrokerAddrs();
+                // 下面这里,按照注释的意思就是将从节点切换为主节点
                 //Switch slave to master: first remove <1, IP:PORT> in namesrv, then add <0, IP:PORT>
                 //The same IP:PORT must only have one record in brokerAddrTable
                 Iterator<Entry<Long, String>> it = brokerAddrsMap.entrySet().iterator();
@@ -157,6 +169,11 @@ public class RouteInfoManager {
                     }
                 }
 
+                // 这里也是主要的逻辑,每隔30s发送注册请求作为心跳的时候,最核心的处理逻辑
+                // 其实就是每隔30s都会封装一个新的BrokerLiveInfo方入Map中
+                // 所以每隔30s,最新的BrokerLiveInfo都会覆盖之前的BrokerLiveInfo
+                // 这个BrokerLiveInfo里,就有一个当前时间戳,代表最近一次心跳的时间
+                // 这就是Broker发送注册请求作为心跳的处理逻辑
                 BrokerLiveInfo prevBrokerLiveInfo = this.brokerLiveTable.put(brokerAddr,
                     new BrokerLiveInfo(
                         System.currentTimeMillis(),
@@ -428,14 +445,21 @@ public class RouteInfoManager {
     }
 
     public void scanNotActiveBroker() {
+        // Broker注册或者发送注册心跳时,在NameServer这边其实存储的是BrokerLiveInfo数据,并且维护在brokerLiveTable数据表中
+        // BrokerLiveInfo会保存节点的一些信息比如:节点名称\id\最近一次心跳时间,Broker每次向NameServer发送心跳,都会更新
+        // brokerLiveTable中节点的BrokerLiveInfo信息
+        // 这里迭代Broker路由信息,查看节点最近一次的心跳时间
         Iterator<Entry<String, BrokerLiveInfo>> it = this.brokerLiveTable.entrySet().iterator();
         while (it.hasNext()) {
             Entry<String, BrokerLiveInfo> next = it.next();
             long last = next.getValue().getLastUpdateTimestamp();
+            // BROKER_CHANNEL_EXPIRED_TIME的默认值为120秒,也就是说如果一个Broker两分钟没发送心跳,就认为其挂掉了
             if ((last + BROKER_CHANNEL_EXPIRED_TIME) < System.currentTimeMillis()) {
+                // 关闭Broker和NameServer连接的Channel
                 RemotingUtil.closeChannel(next.getValue().getChannel());
                 it.remove();
                 log.warn("The broker channel expired, {} {}ms", next.getKey(), BROKER_CHANNEL_EXPIRED_TIME);
+                // 这里就会把Broker从路由数据表中清除
                 this.onChannelDestroy(next.getKey(), next.getValue().getChannel());
             }
         }

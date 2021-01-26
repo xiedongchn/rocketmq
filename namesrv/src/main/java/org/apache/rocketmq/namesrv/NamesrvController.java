@@ -94,6 +94,7 @@ public class NamesrvController {
 
             @Override
             public void run() {
+                // 每隔10秒定时的去感知Broker是否不活跃了
                 NamesrvController.this.routeInfoManager.scanNotActiveBroker();
             }
         }, 5, 10, TimeUnit.SECONDS);

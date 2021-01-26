@@ -939,6 +939,9 @@ public class BrokerController {
         }
 
         // 下面是很关键的一个代码逻辑,这里往线程池里提交了一个任务,让他去给NameServer进行注册
+        // 启动了一个定时调度任务,默认是每隔30秒会执行一次Broker注册的过程
+        // 第一次发送注册请求是进行注册,会把Broker路由数据放到NameServer的RouteInfoManager路由数据表里
+        // 后续发送的注册请求,其实本质上就是Broker发送心跳给NameServer
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -950,6 +953,7 @@ public class BrokerController {
                     log.error("registerBrokerAll Exception", e);
                 }
             }
+            // 这里的registerNameServerPeriod,注册周期,默认为30秒
         }, 1000 * 10, Math.max(10000, Math.min(brokerConfig.getRegisterNameServerPeriod(), 60000)), TimeUnit.MILLISECONDS);
 
         // 下面两个也是在启动功能组件
