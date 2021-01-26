@@ -894,10 +894,12 @@ public class BrokerController {
     }
 
     public void start() throws Exception {
+        // 启动核心的消息存储组件
         if (this.messageStore != null) {
             this.messageStore.start();
         }
 
+        // 启动Netty服务器,这样就能接收请求了
         if (this.remotingServer != null) {
             this.remotingServer.start();
         }
@@ -906,14 +908,18 @@ public class BrokerController {
             this.fastRemotingServer.start();
         }
 
+        // 下面是FileWatchService,是跟文件相关的一个服务组件的启动
         if (this.fileWatchService != null) {
             this.fileWatchService.start();
         }
 
+        // 关键点,这个BrokerOuterAPI是核心组件,实际上是让Broker通过Netty客户端去发送请求出去给别人的
+        // 比如说Broker发送请求到NameServer去注册以及心跳,其实都是通过这个组件
         if (this.brokerOuterAPI != null) {
             this.brokerOuterAPI.start();
         }
 
+        // 下面几个实现功能的核心组件
         if (this.pullRequestHoldService != null) {
             this.pullRequestHoldService.start();
         }
@@ -932,11 +938,13 @@ public class BrokerController {
             this.registerBrokerAll(true, false, true);
         }
 
+        // 下面是很关键的一个代码逻辑,这里往线程池里提交了一个任务,让他去给NameServer进行注册
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
             public void run() {
                 try {
+                    // Broker启动后向NameServer发起注册就在这里
                     BrokerController.this.registerBrokerAll(true, false, brokerConfig.isForceRegister());
                 } catch (Throwable e) {
                     log.error("registerBrokerAll Exception", e);
@@ -944,6 +952,7 @@ public class BrokerController {
             }
         }, 1000 * 10, Math.max(10000, Math.min(brokerConfig.getRegisterNameServerPeriod(), 60000)), TimeUnit.MILLISECONDS);
 
+        // 下面两个也是在启动功能组件
         if (this.brokerStatsManager != null) {
             this.brokerStatsManager.start();
         }
@@ -973,7 +982,9 @@ public class BrokerController {
         doRegisterBrokerAll(true, false, topicConfigSerializeWrapper);
     }
 
+    // 将Broker注册到NameServer
     public synchronized void registerBrokerAll(final boolean checkOrderConfig, boolean oneway, boolean forceRegister) {
+        // Topic配置相关的东西
         TopicConfigSerializeWrapper topicConfigWrapper = this.getTopicConfigManager().buildTopicConfigSerializeWrapper();
 
         if (!PermName.isWriteable(this.getBrokerConfig().getBrokerPermission())
@@ -988,6 +999,7 @@ public class BrokerController {
             topicConfigWrapper.setTopicConfigTable(topicConfigTable);
         }
 
+        // 判断是否要进行注册,要注册则调用doRegisterBrokerAll()方法,真正的去注册
         if (forceRegister || needRegister(this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
             this.brokerConfig.getBrokerName(),
@@ -997,8 +1009,11 @@ public class BrokerController {
         }
     }
 
+    // 真正进行Broker注册的方法
     private void doRegisterBrokerAll(boolean checkOrderConfig, boolean oneway,
         TopicConfigSerializeWrapper topicConfigWrapper) {
+        // 这里体现了Broker注册是通过brokerOuterAPI进行的
+        // 注册的结果是个List,因为Broker会把自己注册给所有的NameServer
         List<RegisterBrokerResult> registerBrokerResultList = this.brokerOuterAPI.registerBrokerAll(
             this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
@@ -1011,6 +1026,7 @@ public class BrokerController {
             this.brokerConfig.getRegisterBrokerTimeoutMills(),
             this.brokerConfig.isCompressedRegister());
 
+        // 注册结果大于0,那么就对注册结果进行后续的处理
         if (registerBrokerResultList.size() > 0) {
             RegisterBrokerResult registerBrokerResult = registerBrokerResultList.get(0);
             if (registerBrokerResult != null) {

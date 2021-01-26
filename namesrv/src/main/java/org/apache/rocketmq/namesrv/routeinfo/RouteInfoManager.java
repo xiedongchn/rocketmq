@@ -111,6 +111,7 @@ public class RouteInfoManager {
         RegisterBrokerResult result = new RegisterBrokerResult();
         try {
             try {
+                // 因为要操作多个Map,所以要先加锁,由于需要预先加锁,所以对应的Map只需要是HashMap类型即可,而不需要ConcurrentHashMap
                 this.lock.writeLock().lockInterruptibly();
 
                 Set<String> brokerNames = this.clusterAddrTable.get(clusterName);

@@ -85,6 +85,7 @@ public class NamesrvController {
             Executors.newFixedThreadPool(nettyServerConfig.getServerWorkerThreads(), new ThreadFactoryImpl("RemotingExecutorThread_"));
 
         // 把工作线程池交给Netty服务器
+        // 核心代码,注册Processor,请求处理器,是NameServer用来处理网络请求的组件
         this.registerProcessor();
 
         // 启动一个后台线程,执行定时任务的
@@ -150,12 +151,13 @@ public class NamesrvController {
     }
 
     private void registerProcessor() {
-        if (namesrvConfig.isClusterTest()) {
+        if (namesrvConfig.isClusterTest()) {// 测试集群的代码
 
             this.remotingServer.registerDefaultProcessor(new ClusterTestRequestProcessor(this, namesrvConfig.getProductEnvName()),
                 this.remotingExecutor);
         } else {
-
+            // 在这里,把NameServer的默认请求处理组件注册进去,注册给了NettyServer--remotingServer
+            // 也就是说,NettyServer接收到的网络请求,都会由这个组件来处理
             this.remotingServer.registerDefaultProcessor(new DefaultRequestProcessor(this), this.remotingExecutor);
         }
     }
