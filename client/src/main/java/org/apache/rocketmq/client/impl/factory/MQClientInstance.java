@@ -166,6 +166,7 @@ public class MQClientInstance {
                 String[] item = broker.split(":");
                 int nums = Integer.parseInt(item[1]);
                 for (int i = 0; i < nums; i++) {
+                    // 根据Broker和Topic构造出MessageQueue,这样就是到一个Topic的MessageQueue分布
                     MessageQueue mq = new MessageQueue(topic, item[0], i);
                     info.getMessageQueueList().add(mq);
                 }
@@ -609,6 +610,8 @@ public class MQClientInstance {
                 try {
                     TopicRouteData topicRouteData;
                     if (isDefault && defaultMQProducer != null) {
+                        // 内部先构造一个RequestHeader请求对象,再封装一个RemotingCommand,最后通过底层的Netty客户端发送请求到
+                        // NameServer,然后接收到一个Response对象,并从中去除Topic路由数据,更新到自己本地的缓存中
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                             1000 * 3);
                         if (topicRouteData != null) {
@@ -622,17 +625,21 @@ public class MQClientInstance {
                         topicRouteData = this.mQClientAPIImpl.getTopicRouteInfoFromNameServer(topic, 1000 * 3);
                     }
                     if (topicRouteData != null) {
+                        // 先取出旧的路由信息
                         TopicRouteData old = this.topicRouteTable.get(topic);
+                        // 比对新的路由信息和旧的路由信息是否一致
                         boolean changed = topicRouteDataIsChange(old, topicRouteData);
                         if (!changed) {
+                            // 迭代路由数据校验如果发生了改变,则把新的路由信息
                             changed = this.isNeedUpdateTopicRouteInfo(topic);
                         } else {
                             log.info("the topic[{}] route info changed, old[{}] ,new[{}]", topic, old, topicRouteData);
                         }
 
+                        // 发生了改变则把新的路由信息给同步到本地缓存中
                         if (changed) {
                             TopicRouteData cloneTopicRouteData = topicRouteData.cloneTopicRouteData();
-
+                            // 更新本地缓存的路由信息
                             for (BrokerData bd : topicRouteData.getBrokerDatas()) {
                                 this.brokerAddrTable.put(bd.getBrokerName(), bd.getBrokerAddrs());
                             }
@@ -789,12 +796,16 @@ public class MQClientInstance {
     private boolean topicRouteDataIsChange(TopicRouteData olddata, TopicRouteData nowdata) {
         if (olddata == null || nowdata == null)
             return true;
+        // 拷贝一份数据用于比较
         TopicRouteData old = olddata.cloneTopicRouteData();
         TopicRouteData now = nowdata.cloneTopicRouteData();
+        // 将消息队列数据排序
+        // 将Broker数据排序
         Collections.sort(old.getQueueDatas());
         Collections.sort(old.getBrokerDatas());
         Collections.sort(now.getQueueDatas());
         Collections.sort(now.getBrokerDatas());
+        // equals方法将新旧路由数据的
         return !old.equals(now);
 
     }

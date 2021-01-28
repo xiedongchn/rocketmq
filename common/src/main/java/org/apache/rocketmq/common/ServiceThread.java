@@ -122,6 +122,7 @@ public abstract class ServiceThread implements Runnable {
 
     public void wakeup() {
         if (hasNotified.compareAndSet(false, true)) {
+            // countDown方法会唤醒等待中的线程
             waitPoint.countDown(); // notify
         }
     }

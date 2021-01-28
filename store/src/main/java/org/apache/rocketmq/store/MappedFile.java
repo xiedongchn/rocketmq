@@ -207,6 +207,7 @@ public class MappedFile extends ReferenceResource {
             byteBuffer.position(currentPos);
             AppendMessageResult result;
             if (messageExt instanceof MessageExtBrokerInner) {
+                // doAppend把消息追加到MappedFile映射的一块内存中去,后续是同步刷盘还是异步刷盘取决于配置
                 result = cb.doAppend(this.getFileFromOffset(), byteBuffer, this.fileSize - currentPos, (MessageExtBrokerInner) messageExt);
             } else if (messageExt instanceof MessageExtBatch) {
                 result = cb.doAppend(this.getFileFromOffset(), byteBuffer, this.fileSize - currentPos, (MessageExtBatch) messageExt);
@@ -278,6 +279,8 @@ public class MappedFile extends ReferenceResource {
                     if (writeBuffer != null || this.fileChannel.position() != 0) {
                         this.fileChannel.force(false);
                     } else {
+                        // 最终刷盘的逻辑,强制把内存的数据刷入到磁盘文件中去
+                        // MappedByteBuffer 就是 JDK NIO 包下的 API
                         this.mappedByteBuffer.force();
                     }
                 } catch (Throwable e) {

@@ -156,6 +156,9 @@ public class DefaultMessageStore implements MessageStore {
 
         this.indexService.start();
 
+        // 初始化dispatcherList,有两个对象,分别是
+        // CommitLogDispatcherBuildConsumeQueue:转发ConsumeQueue
+        // CommitLogDispatcherBuildIndex:转发IndexFile
         this.dispatcherList = new LinkedList<>();
         this.dispatcherList.addLast(new CommitLogDispatcherBuildConsumeQueue());
         this.dispatcherList.addLast(new CommitLogDispatcherBuildIndex());
@@ -1210,6 +1213,7 @@ public class DefaultMessageStore implements MessageStore {
             }
         }
 
+        // 根据Id获取其中一个ConsumeQueue
         ConsumeQueue logic = map.get(queueId);
         if (null == logic) {
             ConsumeQueue newLogic = new ConsumeQueue(
@@ -1500,7 +1504,9 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     public void putMessagePositionInfo(DispatchRequest dispatchRequest) {
+        // ConsumeQueue的持久化,就是找到当前Topic的MessageQueueId对应的ConsumeQueue文件
         ConsumeQueue cq = this.findConsumeQueue(dispatchRequest.getTopic(), dispatchRequest.getQueueId());
+        // 然后将消息写入文件中
         cq.putMessagePositionInfoWrapper(dispatchRequest);
     }
 
@@ -1873,6 +1879,7 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    // 内部线程,诸法CommitLog更新事件,让任务处理器去更新ConsumeQueue和IndexFile
     class ReputMessageService extends ServiceThread {
 
         private volatile long reputFromOffset = 0;
@@ -1929,12 +1936,14 @@ public class DefaultMessageStore implements MessageStore {
                         this.reputFromOffset = result.getStartOffset();
 
                         for (int readSize = 0; readSize < result.getSize() && doNext; ) {
+                            // 从CommitLog中获取一个DispatchRequest,拿到一份需要进行转发的消息,
                             DispatchRequest dispatchRequest =
                                 DefaultMessageStore.this.commitLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false);
                             int size = dispatchRequest.getBufferSize() == -1 ? dispatchRequest.getMsgSize() : dispatchRequest.getBufferSize();
 
                             if (dispatchRequest.isSuccess()) {
                                 if (size > 0) {
+                                    // 通过doDispatch方法把消息进行转发,一个是转发到ConsumeQueue去,一个是转发到IndexFile去
                                     DefaultMessageStore.this.doDispatch(dispatchRequest);
 
                                     if (BrokerRole.SLAVE != DefaultMessageStore.this.getMessageStoreConfig().getBrokerRole()
@@ -1991,7 +2000,9 @@ public class DefaultMessageStore implements MessageStore {
 
             while (!this.isStopped()) {
                 try {
+                    // 这个线程里,每隔1毫秒,就会把最近写入CommitLog的消息进行一次转发,转发到ConsumeQueue和IndexFile中
                     Thread.sleep(1);
+                    // 通过doReput方法来实现
                     this.doReput();
                 } catch (Exception e) {
                     DefaultMessageStore.log.warn(this.getServiceName() + " service has exception. ", e);

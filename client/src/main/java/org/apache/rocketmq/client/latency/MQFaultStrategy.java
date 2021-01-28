@@ -58,8 +58,13 @@ public class MQFaultStrategy {
     public MessageQueue selectOneMessageQueue(final TopicPublishInfo tpInfo, final String lastBrokerName) {
         if (this.sendLatencyFaultEnable) {
             try {
+                // 先获取一个自增的index
                 int index = tpInfo.getSendWhichQueue().getAndIncrement();
                 for (int i = 0; i < tpInfo.getMessageQueueList().size(); i++) {
+                    // 利用index取模
+                    // 这种操作就是一种简单的负载均衡的算法，比如一个 Topic 有 8 个 MessageQueue，
+                    // 那么可能第一次发送消息到 MessageQueue01，第二次就发送消息到 MessageQueue02，
+                    // 以此类推，就是轮询把消息发送到各个 MessageQueue 而已！
                     int pos = Math.abs(index++) % tpInfo.getMessageQueueList().size();
                     if (pos < 0)
                         pos = 0;

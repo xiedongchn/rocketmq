@@ -828,6 +828,8 @@ public class CommitLog {
         MappedFile unlockMappedFile = null;
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
 
+        // 上PutMessageLock锁,也就是说,Broker在写入消息到CommitLog文件的时候,都是串行的,不会并发的写入,
+        // 并发写入必然会有数据错乱的问题
         putMessageLock.lock(); //spin or ReentrantLock ,depending on store config
         try {
             long beginLockTimestamp = this.defaultMessageStore.getSystemClock().now();
@@ -860,6 +862,7 @@ public class CommitLog {
                         beginTimeInLock = 0;
                         return new PutMessageResult(PutMessageStatus.CREATE_MAPEDFILE_FAILED, result);
                     }
+                    // 关键代码,消息写入到MappedFile
                     result = mappedFile.appendMessage(msg, this.appendMessageCallback);
                     break;
                 case MESSAGE_SIZE_EXCEEDED:
@@ -894,12 +897,15 @@ public class CommitLog {
         storeStatsService.getSinglePutMessageTopicTimesTotal(msg.getTopic()).incrementAndGet();
         storeStatsService.getSinglePutMessageTopicSizeTotal(topic).addAndGet(result.getWroteBytes());
 
+        // 处理消息刷盘,是同步还是异步
         handleDiskFlush(result, putMessageResult, msg);
+        // 决定如何把消息同步给Slava Broker
         handleHA(result, putMessageResult, msg);
 
         return putMessageResult;
     }
 
+    // 提交刷盘请求的方法
     public CompletableFuture<PutMessageStatus> submitFlushRequest(AppendMessageResult result, PutMessageResult putMessageResult,
                                                                   MessageExt messageExt) {
         // Synchronization flush
@@ -949,14 +955,18 @@ public class CommitLog {
 
     public void handleDiskFlush(AppendMessageResult result, PutMessageResult putMessageResult, MessageExt messageExt) {
         // Synchronization flush
+        // 同步刷盘
         if (FlushDiskType.SYNC_FLUSH == this.defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
             final GroupCommitService service = (GroupCommitService) this.flushCommitLogService;
             if (messageExt.isWaitStoreMsgOK()) {
+                // 构建一个GroupCommitRequest,提交给GroupCommitService进行处理
                 GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes());
+                // 把request给put进去,然后由线程去处理
                 service.putRequest(request);
                 CompletableFuture<PutMessageStatus> flushOkFuture = request.future();
                 PutMessageStatus flushStatus = null;
                 try {
+                    // 这里的get方法是阻塞的等待刷盘返回结果
                     flushStatus = flushOkFuture.get(this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout(),
                             TimeUnit.MILLISECONDS);
                 } catch (InterruptedException | ExecutionException | TimeoutException e) {
@@ -972,7 +982,10 @@ public class CommitLog {
             }
         }
         // Asynchronous flush
+        // 异步刷盘FlushCommitLogService是个线程,它是个抽象父类,子类实现是CommitRealTimeService,所以这里wakeup唤醒的是其子类代表的线程
         else {
+            // 启用transientStorePoolEnable时,才会采用CommitRealTimeService执行异步刷盘,默认是使用FlushCommitLogService
+            // 前者只是提交数据到ByteBuffer,后者才是真正把ByteBuffer的数据刷到磁盘的任务
             if (!this.defaultMessageStore.getMessageStoreConfig().isTransientStorePoolEnable()) {
                 flushCommitLogService.wakeup();
             } else {
@@ -1241,8 +1254,11 @@ public class CommitLog {
 
         @Override
         public void run() {
+            // 被wakeup之后,就会执行线程里的逻辑
             CommitLog.log.info(this.getServiceName() + " service started");
+            // while线程不停的执行除非停止
             while (!this.isStopped()) {
+                // 间隔多久执行一次刷盘
                 int interval = CommitLog.this.defaultMessageStore.getMessageStoreConfig().getCommitIntervalCommitLog();
 
                 int commitDataLeastPages = CommitLog.this.defaultMessageStore.getMessageStoreConfig().getCommitCommitLogLeastPages();
@@ -1257,6 +1273,7 @@ public class CommitLog {
                 }
 
                 try {
+                    // 这里把数据提交到ByteBuffer中,FlushRealTimeService才是真正每10秒将buffer中的数据刷盘的任务
                     boolean result = CommitLog.this.mappedFileQueue.commit(commitDataLeastPages);
                     long end = System.currentTimeMillis();
                     if (!result) {
@@ -1268,6 +1285,7 @@ public class CommitLog {
                     if (end - begin > 500) {
                         log.info("Commit data to file costs {} ms", end - begin);
                     }
+                    // 停顿间隔时间
                     this.waitForRunning(interval);
                 } catch (Throwable e) {
                     CommitLog.log.error(this.getServiceName() + " service has exception. ", e);
@@ -1414,6 +1432,7 @@ public class CommitLog {
             this.requestsRead = tmp;
         }
 
+        // doCommit被run方法调用,去不停的处理GroupCommitRequest
         private void doCommit() {
             synchronized (this.requestsRead) {
                 if (!this.requestsRead.isEmpty()) {
@@ -1422,6 +1441,7 @@ public class CommitLog {
                         // two times the flush
                         boolean flushOK = false;
                         for (int i = 0; i < 2 && !flushOK; i++) {
+                            // 也是先写Page cache
                             flushOK = CommitLog.this.mappedFileQueue.getFlushedWhere() >= req.getNextOffset();
 
                             if (!flushOK) {
@@ -1429,6 +1449,7 @@ public class CommitLog {
                             }
                         }
 
+                        // 这个相当于异步回调方法,返回结果
                         req.wakeupCustomer(flushOK ? PutMessageStatus.PUT_OK : PutMessageStatus.FLUSH_DISK_TIMEOUT);
                     }
 
@@ -1451,7 +1472,9 @@ public class CommitLog {
 
             while (!this.isStopped()) {
                 try {
+                    // 每10毫秒
                     this.waitForRunning(10);
+                    // 启动一次刷盘
                     this.doCommit();
                 } catch (Exception e) {
                     CommitLog.log.warn(this.getServiceName() + " service has exception. ", e);

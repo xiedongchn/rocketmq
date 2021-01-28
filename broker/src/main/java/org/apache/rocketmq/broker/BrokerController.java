@@ -894,7 +894,8 @@ public class BrokerController {
     }
 
     public void start() throws Exception {
-        // 启动核心的消息存储组件
+        // 启动核心的消息存储组件,将消息写入CommitLog,同时其内的ReputMessageService线程还会把最近写入CommitLog的消息进行一次转发,
+        // 转发到ConsumeQueue和IndexFile里去
         if (this.messageStore != null) {
             this.messageStore.start();
         }
