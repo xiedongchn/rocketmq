@@ -291,6 +291,10 @@ public class DefaultMessageStore implements MessageStore {
         this.storeStatsService.start();
 
         this.createTempFile();
+        // 每10秒定期检查过期的数据文件,Broker默认只把文件保留72小时,也就是三天,超过时限就会删除掉
+        // 或者磁盘使用率达到一定程度,也会触发删除操作
+        // 哪怕消息还没有消费,也会删除文件
+        // 可以通过修改fileReservedTime来配置这个时间
         this.addScheduleTask();
         this.shutdown = false;
     }
@@ -1299,6 +1303,7 @@ public class DefaultMessageStore implements MessageStore {
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
+                // 定期的清理文件
                 DefaultMessageStore.this.cleanFilesPeriodically();
             }
         }, 1000 * 60, this.messageStoreConfig.getCleanResourceInterval(), TimeUnit.MILLISECONDS);
@@ -1345,7 +1350,9 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     private void cleanFilesPeriodically() {
+        // 清理CommitLog
         this.cleanCommitLogService.run();
+        // 清理ConsumeQueue
         this.cleanConsumeQueueService.run();
     }
 
@@ -1589,9 +1596,11 @@ public class DefaultMessageStore implements MessageStore {
     class CleanCommitLogService {
 
         private final static int MAX_MANUAL_DELETE_FILE_TIMES = 20;
+        // 磁盘空间达到90%就报警
         private final double diskSpaceWarningLevelRatio =
             Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceWarningLevelRatio", "0.90"));
 
+        // 磁盘空间使用率达到85%触发文件删除
         private final double diskSpaceCleanForciblyRatio =
             Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceCleanForciblyRatio", "0.85"));
         private long lastRedeleteTimestamp = 0;
@@ -1621,7 +1630,11 @@ public class DefaultMessageStore implements MessageStore {
             int deletePhysicFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteCommitLogFilesInterval();
             int destroyMapedFileIntervalForcibly = DefaultMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
 
+            // 检测是否到达默认的文件删除时间->deleteWhen,默认配置的是凌晨4点,此时会触发删除文件的逻辑
             boolean timeup = this.isTimeToDelete();
+            // 这里判断检测一下磁盘的使用率
+            // 如果磁盘使用率超过 85% 了,那么此时可以允许继续写入数据,但是此时会立马触发删除文件的逻辑
+            // 如果磁盘使用率超过 90% 了,那么此时不允许在磁盘里写入新数据,立马删除文件。因为一旦磁盘满了,那么写入磁盘会失败,此时 MQ 就彻底故障了
             boolean spacefull = this.isSpaceToDelete();
             boolean manualDelete = this.manualDeleteFileSeveralTimes > 0;
 
